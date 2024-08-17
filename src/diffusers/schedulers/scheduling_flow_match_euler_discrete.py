@@ -22,6 +22,7 @@ from ..configuration_utils import ConfigMixin, register_to_config
 from ..utils import BaseOutput, logging
 from ..utils.torch_utils import randn_tensor
 from .scheduling_utils import SchedulerMixin
+import threading
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -74,8 +75,8 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
         sigmas = shift * sigmas / (1 + (shift - 1) * sigmas)
 
         self.timesteps = sigmas * num_train_timesteps
-
-        self._step_index = None
+        self._step_index=threading.local()
+        self._step_index.step = None
         self._begin_index = None
 
         self.sigmas = sigmas.to("cpu")  # to avoid too much CPU/GPU communication
@@ -87,7 +88,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
         """
         The index counter for current timestep. It will increase 1 after each scheduler step.
         """
-        return self._step_index
+        return self._step_index.step
 
     @property
     def begin_index(self):
@@ -189,7 +190,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
         self.timesteps = timesteps.to(device=device)
         self.sigmas = torch.cat([sigmas, torch.zeros(1, device=sigmas.device)])
 
-        self._step_index = None
+        self._step_index.step = None
         self._begin_index = None
 
     def index_for_timestep(self, timestep, schedule_timesteps=None):
@@ -210,9 +211,9 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
         if self.begin_index is None:
             if isinstance(timestep, torch.Tensor):
                 timestep = timestep.to(self.timesteps.device)
-            self._step_index = self.index_for_timestep(timestep)
+            self._step_index.step = self.index_for_timestep(timestep)
         else:
-            self._step_index = self._begin_index
+            self._step_index.step = self._begin_index
 
     def step(
         self,
@@ -304,7 +305,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
         prev_sample = prev_sample.to(model_output.dtype)
 
         # upon completion increase step index by one
-        self._step_index += 1
+        self._step_index.step += 1
 
         if not return_dict:
             return (prev_sample,)
